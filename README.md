@@ -57,9 +57,11 @@ $env:GOOGLE_GENAI_USE_VERTEXAI       = "true"
 
 ### 2. Virtual Environment & Dependencies Installation
 
-It is highly recommended to isolate your dependencies using a virtual environment (`venv`):
+Choose one of the two setup methods below depending on your preference:
 
-#### PowerShell (Windows):
+#### Option A: Setup with Bare `pip`
+
+##### PowerShell (Windows):
 ```powershell
 # Create virtual environment
 python -m venv venv
@@ -71,7 +73,7 @@ python -m venv venv
 pip install -r requirements.txt
 ```
 
-#### Bash (macOS/Linux):
+##### Bash (macOS/Linux):
 ```bash
 # Create virtual environment
 python -m venv venv
@@ -81,6 +83,32 @@ source venv/bin/activate
 
 # Install requirements
 pip install -r requirements.txt
+```
+
+#### Option B: Setup with `uv`
+
+##### PowerShell (Windows):
+```powershell
+# Create virtual environment using uv (creates .venv)
+uv venv
+
+# Activate virtual environment
+.\.venv\Scripts\Activate.ps1
+
+# Install requirements using uv
+uv pip install -r requirements.txt
+```
+
+##### Bash (macOS/Linux):
+```bash
+# Create virtual environment using uv (creates .venv)
+uv venv
+
+# Activate virtual environment
+source .venv/bin/activate
+
+# Install requirements using uv
+uv pip install -r requirements.txt
 ```
 
 ### 3. Application Default Credentials (ADC)
