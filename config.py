@@ -13,6 +13,7 @@ BQ_QUERY_PATH = os.path.join(INPUT_DIR, "bq_query.sql")
 
 OUTPUT_CSV = os.path.join(OUTPUT_DIR, "semantic_search_results.csv")
 OUTPUT_FIG = os.path.join(OUTPUT_DIR, "semantic_search_heatmap.png")
+EVALUATION_CSV = os.path.join(OUTPUT_DIR, "evaluation_analysis.csv")
 
 # ---------------------------------------------------------------------------
 # Semantic Search Configuration
@@ -26,6 +27,12 @@ MODEL = "gemini-embedding-001"                       # same default as KEF's App
 TASK_TYPE = "SEMANTIC_SIMILARITY"
 OUTPUT_DIM = 768                                     # same default as KEF's AppSettings.EMBEDDING_DIMENSION
 PRINT_N_RESULTS = 10
+
+# ---------------------------------------------------------------------------
+# Response Analysis (Judge Agent) Configuration
+# ---------------------------------------------------------------------------
+
+JUDGE_MODEL = "gemini-2.5-flash"
 
 # Auto-detect dataset if the default one is missing in the input directory
 if not os.path.exists(DATASET_PATH):

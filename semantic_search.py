@@ -7,6 +7,7 @@ from utils.auth import _configure_vertex_ai, _configure_api_key
 from utils.embeddings import generate_embeddings_and_matrix
 from utils.data_loader import load_dataset, load_queries
 from utils.visualization import build_and_save_results, plot_and_save_heatmap
+from utils.analysis import run_analysis_pipeline
 
 def main() -> None:
     # Choose auth strategy
@@ -37,6 +38,9 @@ def main() -> None:
 
     build_and_save_results(similarity_matrix, input_queries, low_score_df, config.TOP_K, config.OUTPUT_CSV)
     plot_and_save_heatmap(similarity_matrix, input_queries, low_score_df, config.OUTPUT_FIG)
+
+    # Call the response evaluation analysis agent (judge agent)
+    run_analysis_pipeline(client, similarity_matrix, input_queries, low_score_df)
 
     print("Task completed")
 
