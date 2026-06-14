@@ -79,10 +79,12 @@ def evaluate_response(client: genai.Client, question: str, agent_response: str) 
 
 def run_analysis_pipeline(client: genai.Client, similarity_matrix: np.ndarray, input_queries: list[str], low_score_df: pd.DataFrame) -> None:
     """
-    For each master_question, find the single best matched question from the dataset (maximum similarity).
+    For each master_question, find all matched questions from the dataset that exceed SIMILARITY_THRESHOLD.
+    If no matches exceed the threshold, falls back to the single best match.
     Extract the question, agent_response, overall_score.
-    Call Gemini concurrently to score the QA pair.
-    Saves the output to config.EVALUATION_CSV.
+    De-duplicates unique QA pairs to avoid redundant LLM calls.
+    Call Gemini concurrently to score unique QA pairs.
+    Maps results back to all matched relations and saves to config.EVALUATION_CSV.
     """
     print(f"\n--- Running Response Evaluation Agent (Judge Agent) in Parallel ({config.MAX_WORKERS} workers) ---")
     
@@ -91,80 +93,95 @@ def run_analysis_pipeline(client: genai.Client, similarity_matrix: np.ndarray, i
         print("No queries or dataset records available for analysis.")
         return
 
-    # List to store tasks
-    tasks = []
+    # 1. Collect all matched relationships (queries to dataset rows)
+    relations = []
     for query_idx, query in enumerate(input_queries):
         similarities = similarity_matrix[query_idx]
         
-        # Find index of the highest similarity match (rank = 1)
-        best_match_idx = int(np.argmax(similarities))
-        best_similarity = float(similarities[best_match_idx])
+        # Find all indices exceeding similarity threshold
+        matched_indices = np.where(similarities >= config.SIMILARITY_THRESHOLD)[0]
         
-        # Get data row from dataset
-        row = low_score_df.iloc[best_match_idx]
-        
-        # Extract fields
-        matched_question = row["question_text"]
-        agent_response = row["agent_response"]
-        overall_score = float(row["overall_score"])
-        task_id = row["task_id"]
-        
-        tasks.append({
-            "query_idx": query_idx,
-            "master_question": query,
-            "question": matched_question,
-            "agent_response": agent_response,
-            "overall_score": overall_score,
-            "similarity": best_similarity,
-            "task_id": task_id
-        })
+        # If no matches exceed threshold, fallback to the single best match (argmax)
+        if len(matched_indices) == 0:
+            best_idx = int(np.argmax(similarities))
+            matched_indices = [best_idx]
+            
+        for idx in matched_indices:
+            best_similarity = float(similarities[idx])
+            row = low_score_df.iloc[idx]
+            
+            relations.append({
+                "master_question": query,
+                "question": row["question_text"],
+                "agent_response": row["agent_response"],
+                "overall_score": float(row["overall_score"]),
+                "similarity": best_similarity,
+                "task_id": row["task_id"] if pd.notna(row["task_id"]) else ""
+            })
 
-    results = [None] * len(tasks) # Pre-allocate results to preserve input order
+    # 2. Extract unique QA pairs to evaluate (by task_id or question+response combo)
+    unique_tasks = {}
+    for rel in relations:
+        key = rel["task_id"] if rel["task_id"] else (rel["question"], rel["agent_response"])
+        if key not in unique_tasks:
+            unique_tasks[key] = {
+                "question": rel["question"],
+                "agent_response": rel["agent_response"]
+            }
+
+    unique_keys = list(unique_tasks.keys())
+    total_unique = len(unique_keys)
+    print(f"Found {len(relations)} matching pairs. De-duplicated to {total_unique} unique QA pairs to evaluate.")
+    
+    eval_results = {}
     completed_count = 0
 
-    print(f"Submitting {num_queries} QA pairs for concurrent evaluation...")
-    
-    # Run evaluations in a ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=config.MAX_WORKERS) as executor:
-        # Submit tasks
-        future_to_task = {
-            executor.submit(evaluate_response, client, task["question"], task["agent_response"]): task
-            for task in tasks
-        }
-        
-        for future in as_completed(future_to_task):
-            task = future_to_task[future]
-            query_idx = task["query_idx"]
-            
-            try:
-                eval_result = future.result()
-            except Exception as exc:
-                print(f"Match {query_idx + 1} generated an exception: {exc}")
-                eval_result = {
-                    "judge_score": 0.0,
-                    "reasoning": f"Evaluation error: {exc}"
-                }
-            
-            # Calculate absolute score difference
-            overall_score = task["overall_score"]
-            judge_score = eval_result["judge_score"]
-            score_diff = round(abs(overall_score - judge_score), 4)
-                
-            results[query_idx] = {
-                "master_question": task["master_question"],
-                "question": task["question"],
-                "agent_response": task["agent_response"],
-                "overall_score": overall_score,
-                "judge_score": judge_score,
-                "score_diff": score_diff,
-                "reasoning": eval_result["reasoning"],
-                "similarity": task["similarity"],
-                "task_id": task["task_id"]
+    # Run evaluations in a ThreadPoolExecutor for unique tasks
+    if total_unique > 0:
+        print(f"Submitting {total_unique} unique QA pairs for concurrent evaluation...")
+        with ThreadPoolExecutor(max_workers=config.MAX_WORKERS) as executor:
+            future_to_key = {
+                executor.submit(evaluate_response, client, unique_tasks[key]["question"], unique_tasks[key]["agent_response"]): key
+                for key in unique_keys
             }
             
-            completed_count += 1
-            if completed_count % 5 == 0 or completed_count == num_queries:
-                print(f"Progress: Evaluated {completed_count}/{num_queries} items...")
+            for future in as_completed(future_to_key):
+                key = future_to_key[future]
+                try:
+                    eval_result = future.result()
+                except Exception as exc:
+                    print(f"Evaluation for key {key} generated an exception: {exc}")
+                    eval_result = {
+                        "judge_score": 0.0,
+                        "reasoning": f"Evaluation error: {exc}"
+                    }
+                
+                eval_results[key] = eval_result
+                completed_count += 1
+                if completed_count % 5 == 0 or completed_count == total_unique:
+                    print(f"Progress: Evaluated {completed_count}/{total_unique} unique items...")
+
+    # 3. Map evaluation results back to all matched relations
+    results = []
+    for rel in relations:
+        key = rel["task_id"] if rel["task_id"] else (rel["question"], rel["agent_response"])
+        eval_res = eval_results.get(key, {"judge_score": 0.0, "reasoning": "Missing evaluation"})
+        
+        overall_score = rel["overall_score"]
+        judge_score = eval_res["judge_score"]
+        score_diff = round(abs(overall_score - judge_score), 4)
+            
+        results.append({
+            "master_question": rel["master_question"],
+            "question": rel["question"],
+            "agent_response": rel["agent_response"],
+            "overall_score": overall_score,
+            "judge_score": judge_score,
+            "score_diff": score_diff,
+            "reasoning": eval_res["reasoning"],
+            "similarity": rel["similarity"],
+            "task_id": rel["task_id"]
+        })
 
     # Build final DataFrame
     evaluation_df = pd.DataFrame(results)
