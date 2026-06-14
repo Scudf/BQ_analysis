@@ -111,6 +111,29 @@ source .venv/bin/activate
 uv pip install -r requirements.txt
 ```
 
+> [!WARNING]
+> **PowerShell Execution Policy Issues (Windows):**
+> If PowerShell blocks the activation script (`Activate.ps1`) or if `pip` states "already satisfied" but running the script results in a `ModuleNotFoundError`, it is because the activation was blocked/ignored and your commands were executed globally instead of in the virtual environment.
+> 
+> * **Solution A (Invoke directly without activation):**
+>   You can bypass activation entirely by referencing the virtual environment's executables directly:
+>   * **For Option A (pip):**
+>     ```powershell
+>     .\venv\Scripts\pip.exe install -r requirements.txt
+>     .\venv\Scripts\python.exe semantic_search.py
+>     ```
+>   * **For Option B (uv):**
+>     ```powershell
+>     .\.venv\Scripts\pip.exe install -r requirements.txt
+>     .\.venv\Scripts\python.exe semantic_search.py
+>     ```
+> * **Solution B (Allow Script Execution):**
+>   Allow local script execution in the current PowerShell terminal:
+>   ```powershell
+>   Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
+>   .\venv\Scripts\Activate.ps1   # or .\.venv\Scripts\Activate.ps1 for uv
+>   ```
+
 ### 3. Application Default Credentials (ADC)
 For local development, follow the Google Cloud instruction to set up ADC:
 👉 [Google Cloud ADC Documentation](https://docs.cloud.google.com/docs/authentication/set-up-adc-local-dev-environment)
