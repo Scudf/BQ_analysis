@@ -1,0 +1,7 @@
+google-genai
+pandas
+numpy
+google-cloud-bigquery
+matplotlib
+seaborn
+db-dtypes
