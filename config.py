@@ -33,6 +33,7 @@ PRINT_N_RESULTS = 10
 # ---------------------------------------------------------------------------
 
 JUDGE_MODEL = "gemini-2.5-flash"
+MAX_WORKERS = 10                                     # number of concurrent API requests for evaluation
 
 # Auto-detect dataset if the default one is missing in the input directory
 if not os.path.exists(DATASET_PATH):

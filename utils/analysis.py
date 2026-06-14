@@ -1,5 +1,6 @@
 import os
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import numpy as np
 import pandas as pd
 from google import genai
@@ -17,7 +18,9 @@ def evaluate_response(client: genai.Client, question: str, agent_response: str) 
     """Uses Gemini to evaluate a question-answer pair and returns a dict with score and reasoning."""
     if client is None:
         # Mock mode: return pseudo-random scores and a mock explanation
-        print("Mocking evaluation for QA pair...")
+        # Add a short delay to simulate real latency for testing concurrency
+        import time
+        time.sleep(0.1)
         rng = np.random.default_rng(hash(question + agent_response) & 0xffffffff)
         mock_score = round(rng.uniform(0.1, 0.95), 2)
         mock_reasoning = f"Mock evaluation: The response seems reasonably accurate but has some minor issues (Mock score: {mock_score})."
@@ -78,17 +81,18 @@ def run_analysis_pipeline(client: genai.Client, similarity_matrix: np.ndarray, i
     """
     For each master_question, find the single best matched question from the dataset (maximum similarity).
     Extract the question, agent_response, overall_score.
-    Call Gemini (or mock) to score the QA pair.
+    Call Gemini concurrently to score the QA pair.
     Saves the output to config.EVALUATION_CSV.
     """
-    print("\n--- Running Response Evaluation Agent (Judge Agent) ---")
-    results = []
+    print(f"\n--- Running Response Evaluation Agent (Judge Agent) in Parallel ({config.MAX_WORKERS} workers) ---")
     
     num_queries = len(input_queries)
     if num_queries == 0 or low_score_df.empty:
         print("No queries or dataset records available for analysis.")
         return
 
+    # List to store tasks
+    tasks = []
     for query_idx, query in enumerate(input_queries):
         similarities = similarity_matrix[query_idx]
         
@@ -104,25 +108,59 @@ def run_analysis_pipeline(client: genai.Client, similarity_matrix: np.ndarray, i
         agent_response = row["agent_response"]
         overall_score = float(row["overall_score"])
         task_id = row["task_id"]
-
-        print(f"Evaluating Match {query_idx + 1}/{num_queries}:")
-        print(f"  Master Question : {query}")
-        print(f"  Best Match      : {matched_question} (Sim: {best_similarity:.4f})")
         
-        # Call judge agent
-        eval_result = evaluate_response(client, matched_question, agent_response)
-        
-        results.append({
+        tasks.append({
+            "query_idx": query_idx,
             "master_question": query,
             "question": matched_question,
             "agent_response": agent_response,
             "overall_score": overall_score,
-            "judge_score": eval_result["judge_score"],
-            "reasoning": eval_result["reasoning"],
             "similarity": best_similarity,
             "task_id": task_id
         })
+
+    results = [None] * len(tasks) # Pre-allocate results to preserve input order
+    completed_count = 0
+
+    print(f"Submitting {num_queries} QA pairs for concurrent evaluation...")
+    
+    # Run evaluations in a ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=config.MAX_WORKERS) as executor:
+        # Submit tasks
+        future_to_task = {
+            executor.submit(evaluate_response, client, task["question"], task["agent_response"]): task
+            for task in tasks
+        }
         
+        for future in as_completed(future_to_task):
+            task = future_to_task[future]
+            query_idx = task["query_idx"]
+            
+            try:
+                eval_result = future.result()
+            except Exception as exc:
+                print(f"Match {query_idx + 1} generated an exception: {exc}")
+                eval_result = {
+                    "judge_score": 0.0,
+                    "reasoning": f"Evaluation error: {exc}"
+                }
+                
+            results[query_idx] = {
+                "master_question": task["master_question"],
+                "question": task["question"],
+                "agent_response": task["agent_response"],
+                "overall_score": task["overall_score"],
+                "judge_score": eval_result["judge_score"],
+                "reasoning": eval_result["reasoning"],
+                "similarity": task["similarity"],
+                "task_id": task["task_id"]
+            }
+            
+            completed_count += 1
+            if completed_count % 5 == 0 or completed_count == num_queries:
+                print(f"Progress: Evaluated {completed_count}/{num_queries} items...")
+
+    # Build final DataFrame
     evaluation_df = pd.DataFrame(results)
     
     print(f"Saving evaluation results in {config.EVALUATION_CSV}...")
