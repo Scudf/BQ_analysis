@@ -55,11 +55,31 @@ $env:GOOGLE_GENAI_USE_VERTEXAI       = "true"
 
 *Note: If no credentials are found in the environment, the script will automatically fallback to offline **MOCK mode**.*
 
-### 2. Dependencies installation
+### 2. Virtual Environment & Dependencies Installation
 
-Ensure Python is installed, then run:
+It is highly recommended to isolate your dependencies using a virtual environment (`venv`):
 
+#### PowerShell (Windows):
+```powershell
+# Create virtual environment
+python -m venv venv
+
+# Activate virtual environment
+.\venv\Scripts\Activate.ps1
+
+# Install requirements
+pip install -r requirements.txt
+```
+
+#### Bash (macOS/Linux):
 ```bash
+# Create virtual environment
+python -m venv venv
+
+# Activate virtual environment
+source venv/bin/activate
+
+# Install requirements
 pip install -r requirements.txt
 ```
 
