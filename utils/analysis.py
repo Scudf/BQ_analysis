@@ -144,13 +144,19 @@ def run_analysis_pipeline(client: genai.Client, similarity_matrix: np.ndarray, i
                     "judge_score": 0.0,
                     "reasoning": f"Evaluation error: {exc}"
                 }
+            
+            # Calculate absolute score difference
+            overall_score = task["overall_score"]
+            judge_score = eval_result["judge_score"]
+            score_diff = round(abs(overall_score - judge_score), 4)
                 
             results[query_idx] = {
                 "master_question": task["master_question"],
                 "question": task["question"],
                 "agent_response": task["agent_response"],
-                "overall_score": task["overall_score"],
-                "judge_score": eval_result["judge_score"],
+                "overall_score": overall_score,
+                "judge_score": judge_score,
+                "score_diff": score_diff,
                 "reasoning": eval_result["reasoning"],
                 "similarity": task["similarity"],
                 "task_id": task["task_id"]
@@ -162,6 +168,9 @@ def run_analysis_pipeline(client: genai.Client, similarity_matrix: np.ndarray, i
 
     # Build final DataFrame
     evaluation_df = pd.DataFrame(results)
+    
+    # Sort descending by absolute score difference
+    evaluation_df = evaluation_df.sort_values(by="score_diff", ascending=False)
     
     print(f"Saving evaluation results in {config.EVALUATION_CSV}...")
     evaluation_df.to_csv(config.EVALUATION_CSV, index=False)
